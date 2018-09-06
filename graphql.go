@@ -94,7 +94,7 @@ type RetryConfig struct {
 	// If not specifed, we will use default retry behavior on certain statuses
 	RetryStatus map[int]bool `json:"statusToRetry"`
 	// Client can use this function to supply some logic to further debug GraphQL request & response
-	BeforeRetry func(req *http.Request, resp *http.Response, attemptNum int)
+	BeforeRetry func(req *http.Request, resp *http.Response, err error, attemptNum int)
 }
 
 // PolicyType defines a type of different possible Policies to be applied towards retrying
@@ -124,15 +124,10 @@ var (
 
 // Wrapper method to send request while optionally applying retry policy
 func (c *Client) sendRequest(req *http.Request) (*http.Response, error) {
-	var (
-		resp *http.Response
-		err  error
-	)
-
 	retryConfig := c.retryConfig
 	// Client did not specify retry config
 	if retryConfig.Policy == "" {
-		resp, err = c.httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			return resp, fmt.Errorf("Error getting response: %v", err)
 		}
@@ -140,16 +135,17 @@ func (c *Client) sendRequest(req *http.Request) (*http.Response, error) {
 	}
 
 	c.logf("debug original request: %+v", req)
+
 	// Persist request body
 	var body io.Reader = req.Body
-	for tryCount := 0; tryCount < retryConfig.MaxTries; tryCount++ {
-
+	tryCount := 0
+	for ; tryCount < retryConfig.MaxTries; tryCount++ {
 		// Assign request body for new request before retry with a temp buf
 		buf := new(bytes.Buffer)
 		req.Body = ioutil.NopCloser(io.TeeReader(body, buf))
 
 		c.logf("debug request: %+v", req)
-		resp, err = c.httpClient.Do(req)
+		resp, err := c.httpClient.Do(req)
 		c.logf("debug response: %+v", resp)
 
 		if err == nil && !retryConfig.shouldRetry(resp.StatusCode) {
@@ -160,7 +156,7 @@ func (c *Client) sendRequest(req *http.Request) (*http.Response, error) {
 		body = buf
 
 		if retryConfig.BeforeRetry != nil {
-			retryConfig.BeforeRetry(req, resp, tryCount+1)
+			retryConfig.BeforeRetry(req, resp, err, tryCount+1)
 		}
 
 		c.Log("Will retry after interval expires")
@@ -180,10 +176,9 @@ func (c *Client) sendRequest(req *http.Request) (*http.Response, error) {
 			retryConfig.increaseInterval()
 			c.logf("New interval: %f", retryConfig.Interval)
 		}
-
 	}
 
-	return nil, fmt.Errorf("Error getting response with retry: %s", err)
+	return nil, fmt.Errorf("Client has retried %d times but unable to get a successful response", tryCount)
 }
 
 // Increase interval for exponential backoff policy until hitting MaxInterval
@@ -232,7 +227,7 @@ func WithDefaultExponentialRetryConfig() ClientOption {
 }
 
 // WithBeforeRetryHandler provides a handler for beforeRetry
-func WithBeforeRetryHandler(beforeRetryHandler func(*http.Request, *http.Response, int)) ClientOption {
+func WithBeforeRetryHandler(beforeRetryHandler func(*http.Request, *http.Response, error, int)) ClientOption {
 	return func(client *Client) {
 		client.retryConfig.BeforeRetry = beforeRetryHandler
 	}

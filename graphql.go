@@ -51,6 +51,7 @@ type Client struct {
 	httpClient       *http.Client
 	useMultipartForm bool
 	retryConfig      RetryConfig
+	defaultHeaders   map[string]string
 
 	// closeReq will close the request body immediately allowing for reuse of client
 	closeReq bool
@@ -233,6 +234,13 @@ func WithBeforeRetryHandler(beforeRetryHandler func(*http.Request, *http.Respons
 	}
 }
 
+// WithDefaultHeaders provides a default set of header values
+func WithDefaultHeaders(defaultHeaders map[string]string) ClientOption {
+	return func(client *Client) {
+		client.defaultHeaders = defaultHeaders
+	}
+}
+
 // Run executes the query and unmarshals the response from the data field
 // into the response object.
 // Pass in a nil response object to skip response parsing.
@@ -279,6 +287,9 @@ func (c *Client) runWithJSON(ctx context.Context, req *Request, resp interface{}
 	r.Close = c.closeReq
 	r.Header.Set("Content-Type", "application/json; charset=utf-8")
 	r.Header.Set("Accept", "application/json; charset=utf-8")
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, values := range req.Header {
 		for _, value := range values {
 			r.Header.Add(key, value)
@@ -350,6 +361,9 @@ func (c *Client) runWithPostFields(ctx context.Context, req *Request, resp inter
 	r.Close = c.closeReq
 	r.Header.Set("Content-Type", writer.FormDataContentType())
 	r.Header.Set("Accept", "application/json; charset=utf-8")
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, values := range req.Header {
 		for _, value := range values {
 			r.Header.Add(key, value)

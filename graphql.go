@@ -48,25 +48,26 @@ import (
 	"github.com/pkg/errors"
 )
 
+type Client interface {
+	Run(ctx context.Context, req *Request, resp interface{}) error
+	SetLogger(func(string))
+}
+
 // Client is a client for interacting with a GraphQL API.
-type Client struct {
+type clientImp struct {
 	endpoint         string
 	httpClient       *http.Client
 	useMultipartForm bool
 	retryConfig      RetryConfig
 	defaultHeaders   map[string]string
-
-	// Log is called with various debug information.
-	// To log to standard out, use:
-	//  client.Log = func(s string) { log.Println(s) }
-	Log func(s string)
+	log              func(s string)
 }
 
 // NewClient makes a new Client capable of making GraphQL requests.
-func NewClient(endpoint string, opts ...ClientOption) *Client {
-	c := &Client{
+func NewClient(endpoint string, opts ...ClientOption) Client {
+	c := &clientImp{
 		endpoint: endpoint,
-		Log:      func(string) {},
+		log:      func(string) {},
 	}
 	for _, optionFunc := range opts {
 		optionFunc(c)
@@ -80,8 +81,12 @@ func NewClient(endpoint string, opts ...ClientOption) *Client {
 	return c
 }
 
-func (c *Client) logf(format string, args ...interface{}) {
-	c.Log(fmt.Sprintf(format, args...))
+func (c *clientImp) SetLogger(cb func(string)) {
+	c.log = cb
+}
+
+func (c *clientImp) logf(format string, args ...interface{}) {
+	c.log(fmt.Sprintf(format, args...))
 }
 
 // RetryConfig defines possible fields that client can supply for their retry strategies
@@ -131,7 +136,7 @@ var (
 )
 
 // Wrapper method to send request while optionally applying retry policy
-func (c *Client) sendRequest(retryConfig *RetryConfig, req *http.Request) (*http.Response, error) {
+func (c *clientImp) sendRequest(retryConfig *RetryConfig, req *http.Request) (*http.Response, error) {
 	// Client did not specify retry config
 	if retryConfig.Policy == "" {
 		resp, err := c.httpClient.Do(req)
@@ -230,35 +235,35 @@ func (config *RetryConfig) isValid() bool {
 
 // WithRetryConfig allows consumer to assign their retryConfig to the client's private retryConfig
 func WithRetryConfig(config RetryConfig) ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.retryConfig = config
 	}
 }
 
 // WithDefaultLinearRetryConfig provides a default set of value for linear policy
 func WithDefaultLinearRetryConfig() ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.retryConfig = defaultLinearRetryConfig
 	}
 }
 
 // WithDefaultExponentialRetryConfig provides a default set of value for exponential backoff policy
 func WithDefaultExponentialRetryConfig() ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.retryConfig = defaultExponentialRetryConfig
 	}
 }
 
 // WithBeforeRetryHandler provides a handler for beforeRetry
 func WithBeforeRetryHandler(beforeRetryHandler func(*http.Request, *http.Response, error, int)) ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.retryConfig.BeforeRetry = beforeRetryHandler
 	}
 }
 
 // WithDefaultHeaders provides a default set of header values
 func WithDefaultHeaders(defaultHeaders map[string]string) ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.defaultHeaders = defaultHeaders
 	}
 }
@@ -268,7 +273,7 @@ func WithDefaultHeaders(defaultHeaders map[string]string) ClientOption {
 // Pass in a nil response object to skip response parsing.
 // If the request fails or the server returns an error, the first error
 // will be returned.
-func (c *Client) Run(ctx context.Context, req *Request, resp interface{}) error {
+func (c *clientImp) Run(ctx context.Context, req *Request, resp interface{}) error {
 	// TODO: validate retryConfig
 
 	select {
@@ -285,7 +290,7 @@ func (c *Client) Run(ctx context.Context, req *Request, resp interface{}) error 
 	return c.runWithJSON(ctx, req, resp)
 }
 
-func (c *Client) getTracer() *httptrace.ClientTrace {
+func (c *clientImp) getTracer() *httptrace.ClientTrace {
 	trace := &httptrace.ClientTrace{
 		GotConn: func(connInfo httptrace.GotConnInfo) {
 			c.logf("Connection reused? %t", connInfo.Reused)
@@ -323,7 +328,7 @@ func (c *Client) getTracer() *httptrace.ClientTrace {
 	return trace
 }
 
-func (c *Client) runWithJSON(ctx context.Context, req *Request, resp interface{}) error {
+func (c *clientImp) runWithJSON(ctx context.Context, req *Request, resp interface{}) error {
 	var requestBody bytes.Buffer
 	requestBodyObj := struct {
 		Query     string                 `json:"query"`
@@ -376,7 +381,7 @@ func getGraphQLResp(reader io.ReadCloser, schema interface{}) error {
 	return nil
 }
 
-func (c *Client) executeRequest(gr *graphResponse, r *http.Request) error {
+func (c *clientImp) executeRequest(gr *graphResponse, r *http.Request) error {
 	gqlRetryConfig := c.retryConfig
 	var body io.Reader = r.Body
 	tryCount := 0
@@ -415,7 +420,7 @@ func (c *Client) executeRequest(gr *graphResponse, r *http.Request) error {
 				}
 
 			} else {
-				c.Log("debug return error")
+				c.log("debug return error")
 				return getAggrErr(gr.Errors)
 			}
 
@@ -428,7 +433,7 @@ func (c *Client) executeRequest(gr *graphResponse, r *http.Request) error {
 	return fmt.Errorf("Client has retried %d times but unable to get a successful response. Error: %s", tryCount, getAggrErr(gr.Errors))
 }
 
-func (c *Client) runWithPostFields(ctx context.Context, req *Request, resp interface{}) error {
+func (c *clientImp) runWithPostFields(ctx context.Context, req *Request, resp interface{}) error {
 	var requestBody bytes.Buffer
 	writer := multipart.NewWriter(&requestBody)
 	if err := writer.WriteField("query", req.q); err != nil {
@@ -488,7 +493,7 @@ func (c *Client) runWithPostFields(ctx context.Context, req *Request, resp inter
 // making requests.
 //  NewClient(endpoint, WithHTTPClient(specificHTTPClient))
 func WithHTTPClient(httpclient *http.Client) ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.httpClient = httpclient
 	}
 }
@@ -496,14 +501,14 @@ func WithHTTPClient(httpclient *http.Client) ClientOption {
 // UseMultipartForm uses multipart/form-data and activates support for
 // files.
 func UseMultipartForm() ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.useMultipartForm = true
 	}
 }
 
 // ClientOption are functions that are passed into NewClient to
 // modify the behaviour of the Client.
-type ClientOption func(*Client)
+type ClientOption func(*clientImp)
 
 type graphResponse struct {
 	Data   interface{}

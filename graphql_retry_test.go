@@ -27,9 +27,9 @@ func TestLinearPolicy(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL, WithDefaultLinearRetryConfig())
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(10))
 	defer cancel()
@@ -50,9 +50,9 @@ func TestNilRespStatus200(t *testing.T) {
 	defer srv.Close()
 
 	client := NewClient(srv.URL, WithDefaultLinearRetryConfig())
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	var responseData map[string]interface{}
 	err := client.Run(context.Background(), &Request{q: "query {}"}, &responseData)
@@ -79,9 +79,9 @@ func TestNoPolicySpecified(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL)
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(1))
 	defer cancel()
@@ -109,9 +109,9 @@ func TestCustomRetryStatus(t *testing.T) {
 		RetryStatus: retryStatus,
 	}
 	client := NewClient(srv.URL, WithRetryConfig(retryConfig))
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(1))
 	defer cancel()
@@ -132,9 +132,9 @@ func TestExponentialBackoffPolicy(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL, WithDefaultExponentialRetryConfig(), WithBeforeRetryHandler(logHandler(t)))
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(31))
 	defer cancel()
@@ -164,9 +164,9 @@ func TestExponentialBackoffPolicyMultiPart(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL, WithDefaultExponentialRetryConfig(), WithBeforeRetryHandler(logHandler(t)), UseMultipartForm())
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(31))
 	defer cancel()
@@ -214,9 +214,9 @@ func TestErrCodeRetry(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL, WithDefaultExponentialRetryConfig(), WithBeforeRetryHandler(logHandler(t)), UseMultipartForm())
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(31))
 	defer cancel()
@@ -257,9 +257,9 @@ func TestErrCodeNoRetry(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL, WithDefaultExponentialRetryConfig(), WithBeforeRetryHandler(logHandler(t)), UseMultipartForm())
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(31))
 	defer cancel()

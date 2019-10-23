@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"context"
+	"github.com/matryer/is"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -9,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/matryer/is"
 )
 
 func getTestDuration(sec int) time.Duration {
@@ -283,4 +282,64 @@ func TestErrCodeNoRetry(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "graphql: error 0: message (Requested object was not found)") {
 		is.Fail()
 	}
+}
+
+func TestExponentialBackoffPolicyMultiPart_executeRequest(t *testing.T) {
+	t.Parallel()
+	is := is.New(t)
+	i := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if i > 0 {
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, `{
+				"data": {
+					"something": "yes"
+				}
+				}`)
+		} else {
+
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{
+				"data": {
+					"something": "no"
+				},
+				"errors": [
+					{
+						"message": "testing error message",
+						"name": "service_unavailable",
+						"data": "testing error data"
+					}
+				]
+			}`)
+		}
+		i++
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	client := NewClient(srv.URL, WithDefaultExponentialRetryConfig(), WithBeforeRetryHandler(logHandler(t)), UseMultipartForm())
+	client.Log = func(str string) {
+		t.Log(str)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, getTestDuration(31))
+	defer cancel()
+	var responseData map[string]interface{}
+
+	variables := map[string]interface{}{
+		"a": 1,
+		"b": 2,
+	}
+	fileObj := file{
+		Field: "testField",
+		Name:  "testName",
+		R:     strings.NewReader("testReader"),
+	}
+	graphQLReq := &Request{
+		q:     "query {}",
+		vars:  variables,
+		files: []file{fileObj},
+	}
+	err := client.Run(ctx, graphQLReq, &responseData)
+	is.NoErr(err)
 }

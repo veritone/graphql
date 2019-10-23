@@ -393,7 +393,7 @@ func (c *Client) executeRequest(gr *graphResponse, r *http.Request) error {
 			return err
 		}
 		c.logf("<< %s", buf.String())
-
+		gr.Errors = nil
 		err = getGraphQLResp(res.Body, &gr)
 		if err != nil {
 			return err

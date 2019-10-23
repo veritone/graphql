@@ -1,22 +1,13 @@
 package graphql
 
 import (
-	//"bytes"
 	"context"
 	"github.com/matryer/is"
 	"io"
 	"io/ioutil"
-
-	//"io"
-	"strings"
-
-	//"io"
-
-	//"io"
-	//"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	//"strings"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,7 +152,6 @@ func logHandler(t *testing.T) func(*http.Request, *http.Response, error, int) {
 		t.Logf("Retrying attempt count: %d", attemptCount)
 	}
 }
-
 
 func TestExponentialBackoffPolicyMultiPart(t *testing.T) {
 	t.Parallel()

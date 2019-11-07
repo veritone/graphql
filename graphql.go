@@ -138,71 +138,42 @@ var (
 )
 
 // Wrapper method to send request while optionally applying retry policy
-func (c *clientImp) sendRequest(retryConfig *RetryConfig, req *http.Request) (*http.Response, error) {
-	// Client did not specify retry config
-	if retryConfig.Policy == "" {
-		resp, err := c.httpClient.Do(req)
+func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req *http.Request, tryCount int) (bool, error) {
+	gr.Errors = nil
+	shouldRetryRequest := false
+
+	c.logf("(sendRequest) debug request: %+v", req)
+	resp, err := c.httpClient.Do(req)
+	c.logf("(sendRequest) debug response: %+v", resp)
+
+	if err != nil {
+		c.logf("(sendRequest) debug http request error: %+v", err)
+		shouldRetryRequest = isErrRetryable(err)
+	}
+
+	if resp != nil && !shouldRetryRequest {
+		shouldRetryRequest = retryConfig.shouldRetry(resp.StatusCode)
+	}
+
+	// request timeout or should retry by status
+	// Only return if it is not the last time to try
+	if shouldRetryRequest && tryCount < retryConfig.MaxTries {
+		return shouldRetryRequest, err
+	}
+
+	// Check retry by error messages in graphql response
+	if resp != nil {
+		err = getGraphQLResp(resp.Body, &gr)
 		if err != nil {
-			return resp, fmt.Errorf("Error getting response: %v", err)
+			return shouldRetryRequest, err
 		}
-		return resp, nil
-	}
-
-	c.logf("debug original request: %+v", req)
-
-	// Persist request body
-	var body io.Reader = req.Body
-	tryCount := 0
-	statusCode := 0
-	for ; tryCount < retryConfig.MaxTries; tryCount++ {
-		// Assign request body for new request before retry with a temp buf
-		buf := new(bytes.Buffer)
-		req.Body = ioutil.NopCloser(io.TeeReader(body, buf))
-
-		if req.Context().Err() == context.Canceled {
-			return nil, context.Canceled
-		}
-
-		c.logf("debug request: %+v", req)
-		resp, err := c.httpClient.Do(req)
-		c.logf("debug response: %+v", resp)
-
-		if err != nil && !isErrRetryable(err) {
-			return resp, err
-		}
-		if err == nil {
-			statusCode = resp.StatusCode
-			if !retryConfig.shouldRetry(statusCode) {
-				return resp, err
-			}
-		}
-
-		req.Body.Close()
-		// Assign buf back to body
-		body = buf
-
-		if retryConfig.BeforeRetry != nil {
-			retryConfig.BeforeRetry(req, resp, err, tryCount+1)
-		}
-
-		// Wait for interval
-		c.logf("Waiting for interval(%f) to expire...", retryConfig.Interval)
-		timer := time.NewTimer(time.Duration(retryConfig.Interval) * time.Second)
-
-		ctx := req.Context()
-
-		select {
-		case <-ctx.Done():
-			return nil, errors.New("Context finished unexpectedly")
-
-		case <-timer.C:
-			// Increase interval
-			retryConfig.increaseInterval()
-			c.logf("New interval: %f", retryConfig.Interval)
+		if len(gr.Errors) > 0 {
+			err = getAggrErr(gr.Errors)
+			shouldRetryRequest = shouldRetry(gr.Errors)
 		}
 	}
 
-	return nil, fmt.Errorf("Client has retried %d times but unable to get a successful response. Status code: %d", tryCount, statusCode)
+	return shouldRetryRequest, err
 }
 
 // Increase interval for exponential backoff policy until hitting MaxInterval
@@ -387,52 +358,43 @@ func (c *clientImp) executeRequest(gr *graphResponse, r *http.Request) error {
 	gqlRetryConfig := c.retryConfig
 	var body io.Reader = r.Body
 	tryCount := 0
+	shouldRetryRequest := false
+	var err error
+
 	for ; tryCount < gqlRetryConfig.MaxTries; tryCount++ {
 		buf := new(bytes.Buffer)
 		r.Body = ioutil.NopCloser(io.TeeReader(body, buf))
+		c.logf("<< [%d] %s", tryCount, buf.String())
 
-		retryConfig := c.retryConfig
-		res, err := c.sendRequest(&retryConfig, r)
-		if err != nil {
+		shouldRetryRequest, err = c.sendRequest(gqlRetryConfig, gr, r, (tryCount + 1))
+		c.logf("<< [%d] gr: %+v", tryCount, gr)
+
+		if !shouldRetryRequest || gqlRetryConfig.Policy == "" {
 			return err
 		}
-		c.logf("<< %s", buf.String())
-		gr.Errors = nil
-		err = getGraphQLResp(res.Body, &gr)
-		if err != nil {
-			return err
+
+		// the current time is the last time
+		if tryCount == gqlRetryConfig.MaxTries-1 {
+			break
 		}
-		c.logf("<< gr: %+v", gr)
 
-		if len(gr.Errors) > 0 {
-			// Check to see if we should retry based on error field
-			if retryConfig.Interval <= c.retryConfig.Interval && shouldRetry(gr.Errors) {
-				body = buf
-				timer := time.NewTimer(time.Duration(gqlRetryConfig.Interval) * time.Second)
-				ctx := r.Context()
+		body = buf
+		timer := time.NewTimer(time.Duration(gqlRetryConfig.Interval) * time.Second)
+		ctx := r.Context()
 
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
 
-				case <-timer.C:
-					// Increase interval
-					gqlRetryConfig.increaseInterval()
-					c.logf("New interval: %f", gqlRetryConfig.Interval)
-				}
-
-			} else {
-				c.log("debug return error")
-				return getAggrErr(gr.Errors)
-			}
-
-		} else {
-			// No error so return
-			return nil
+		case <-timer.C:
+			// Increase interval
+			gqlRetryConfig.increaseInterval()
+			c.logf("[%d] New interval: %f", tryCount, gqlRetryConfig.Interval)
 		}
+
 	}
 
-	return fmt.Errorf("Client has retried %d times but unable to get a successful response. Error: %s", tryCount, getAggrErr(gr.Errors))
+	return fmt.Errorf("Client has retried %d times but unable to get a successful response. Error: %+v", gqlRetryConfig.MaxTries, err)
 }
 
 func (c *clientImp) runWithPostFields(ctx context.Context, req *Request, resp interface{}) error {

@@ -2,7 +2,6 @@ package graphql
 
 import (
 	"context"
-	"github.com/matryer/is"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/matryer/is"
 )
 
 func getTestDuration(sec int) time.Duration {
@@ -318,9 +319,9 @@ func TestExponentialBackoffPolicyMultiPart_executeRequest(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL, WithDefaultExponentialRetryConfig(), WithBeforeRetryHandler(logHandler(t)), UseMultipartForm())
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(31))
 	defer cancel()

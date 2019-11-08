@@ -163,9 +163,15 @@ func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req 
 
 	// Check retry by error messages in graphql response
 	if resp != nil {
-		err = getGraphQLResp(resp.Body, &gr)
-		if err != nil {
-			return shouldRetryRequest, resp, err
+		errDecode := getGraphQLResp(resp.Body, &gr)
+		if errDecode != nil {
+			if err != nil {
+				errDecode = fmt.Errorf("Origin error: (%+v), Decode error: (%+v), Response: (%s)", err, errDecode, toJSONString(resp))
+			} else {
+				errDecode = fmt.Errorf("Decode error: (%+v), Response: (%s)", errDecode, toJSONString(resp))
+			}
+
+			return shouldRetryRequest, resp, errDecode
 		}
 		if len(gr.Errors) > 0 {
 			err = getAggrErr(gr.Errors)
@@ -348,7 +354,8 @@ func getGraphQLResp(reader io.ReadCloser, schema interface{}) error {
 
 	err := json.NewDecoder(reader).Decode(schema)
 	if err != nil {
-		return errors.Wrap(err, "decoding response")
+		// fmt.Println(fmt.Sprintf("Failed to decoding: %+v", errors.Wrap(err, "decoding response")))
+		return fmt.Errorf("Failed to decoding: %+v", err)
 	}
 
 	return nil
@@ -478,7 +485,7 @@ func UseMultipartForm() ClientOption {
 
 //ImmediatelyCloseReqBody will close the req body immediately after each request body is ready
 func ImmediatelyCloseReqBody() ClientOption {
-	return func(client *Client) {
+	return func(client *clientImp) {
 		client.closeReq = true
 	}
 }
@@ -551,4 +558,12 @@ type File struct {
 	Field string
 	Name  string
 	R     io.Reader
+}
+
+func toJSONString(data interface{}) string {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Sprintf("%+v", data)
+	}
+	return string(b)
 }

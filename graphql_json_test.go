@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,7 +64,7 @@ func TestDoJSONServerError(t *testing.T) {
 	var responseData map[string]interface{}
 	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
 	is.Equal(calls, 1) // calls
-	is.Equal(err.Error(), "graphql: server returned a non-200 status code: 500")
+	is.True(strings.Contains(err.Error(), "Decode error") && strings.Contains(err.Error(), "Internal Server Error"))
 }
 
 func TestDoJSONBadRequestErr(t *testing.T) {
@@ -78,6 +79,7 @@ func TestDoJSONBadRequestErr(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		io.WriteString(w, `{
 			"errors": [{
+				"name":"BadRequest",
 				"message": "miscellaneous message as to why the the request was bad"
 			}]
 		}`)
@@ -92,7 +94,7 @@ func TestDoJSONBadRequestErr(t *testing.T) {
 	var responseData map[string]interface{}
 	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
 	is.Equal(calls, 1) // calls
-	is.Equal(err.Error(), "graphql: miscellaneous message as to why the the request was bad")
+	is.True(strings.Contains(err.Error(), "message (miscellaneous message as to why the the request was bad)"))
 }
 
 func TestQueryJSON(t *testing.T) {

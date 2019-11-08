@@ -226,7 +226,7 @@ func TestExponentialBackoffPolicyMultiPart(t *testing.T) {
 		"a": 1,
 		"b": 2,
 	}
-	fileObj := file{
+	fileObj := File{
 		Field: "testField",
 		Name:  "testName",
 		R:     strings.NewReader("testReader"),
@@ -234,7 +234,7 @@ func TestExponentialBackoffPolicyMultiPart(t *testing.T) {
 	graphQLReq := &Request{
 		q:     "query {}",
 		vars:  variables,
-		files: []file{fileObj},
+		files: []File{fileObj},
 	}
 	err := client.Run(ctx, graphQLReq, &responseData)
 	t.Logf("err: %s", err)
@@ -276,7 +276,7 @@ func TestErrCodeRetry(t *testing.T) {
 		"a": 1,
 		"b": 2,
 	}
-	fileObj := file{
+	fileObj := File{
 		Field: "testField",
 		Name:  "testName",
 		R:     strings.NewReader("testReader"),
@@ -284,7 +284,7 @@ func TestErrCodeRetry(t *testing.T) {
 	graphQLReq := &Request{
 		q:     "query {}",
 		vars:  variables,
-		files: []file{fileObj},
+		files: []File{fileObj},
 	}
 	err := client.Run(ctx, graphQLReq, &responseData)
 	t.Logf("err: %s", err)
@@ -319,7 +319,7 @@ func TestErrCodeNoRetry(t *testing.T) {
 		"a": 1,
 		"b": 2,
 	}
-	fileObj := file{
+	fileObj := File{
 		Field: "testField",
 		Name:  "testName",
 		R:     strings.NewReader("testReader"),
@@ -327,7 +327,7 @@ func TestErrCodeNoRetry(t *testing.T) {
 	graphQLReq := &Request{
 		q:     "query {}",
 		vars:  variables,
-		files: []file{fileObj},
+		files: []File{fileObj},
 	}
 	err := client.Run(ctx, graphQLReq, &responseData)
 	if !strings.HasPrefix(err.Error(), "graphql: error 0: name (not_found), message (Requested object was not found)") {
@@ -381,7 +381,7 @@ func TestExponentialBackoffPolicyMultiPart_executeRequest(t *testing.T) {
 		"a": 1,
 		"b": 2,
 	}
-	fileObj := file{
+	fileObj := File{
 		Field: "testField",
 		Name:  "testName",
 		R:     strings.NewReader("testReader"),
@@ -389,7 +389,7 @@ func TestExponentialBackoffPolicyMultiPart_executeRequest(t *testing.T) {
 	graphQLReq := &Request{
 		q:     "query {}",
 		vars:  variables,
-		files: []file{fileObj},
+		files: []File{fileObj},
 	}
 	err := client.Run(ctx, graphQLReq, &responseData)
 	is.NoErr(err)

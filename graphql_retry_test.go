@@ -2,7 +2,7 @@ package graphql
 
 import (
 	"context"
-	"github.com/matryer/is"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/matryer/is"
 )
 
 func getTestDuration(sec int) time.Duration {
@@ -140,6 +142,55 @@ func TestExponentialBackoffPolicy(t *testing.T) {
 	var responseData map[string]interface{}
 	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
 	if !strings.HasPrefix(err.Error(), "Client has retried ") {
+		is.Fail()
+	}
+}
+
+func TestRetryByErrorName(t *testing.T) {
+	t.Parallel()
+	is := is.New(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+
+		is.Equal(r.Method, http.MethodPost)
+		b, err := ioutil.ReadAll(r.Body)
+		is.NoErr(err)
+		is.Equal(string(b), `{"query":"query {}","variables":null}`+"\n")
+		io.WriteString(w, `{
+			"data": {
+				"something": "no"
+			},
+			"errors":[
+				{
+					"name":"service_failure"
+				}
+			]
+		}`)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	retryCfg := RetryConfig{
+		MaxTries:    2,
+		Interval:    1,
+		Policy:      ExponentialBackoff,
+		MaxInterval: 16,
+	}
+	client := NewClient(srv.URL, WithRetryConfig(retryCfg))
+
+	client.SetLogger(func(str string) {
+		t.Log(str)
+	})
+
+	ctx, cancel := context.WithTimeout(ctx, getTestDuration(10))
+	defer cancel()
+	var responseData map[string]interface{}
+	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
+	is.True(responseData != nil)
+	is.Equal(responseData["something"], "no")
+	is.True(err != nil)
+	is.True(strings.Contains(err.Error(), "service_failure"))
+	if !strings.HasPrefix(err.Error(), fmt.Sprintf("Client has retried %d times", retryCfg.MaxTries)) {
 		is.Fail()
 	}
 }
@@ -279,7 +330,7 @@ func TestErrCodeNoRetry(t *testing.T) {
 		files: []file{fileObj},
 	}
 	err := client.Run(ctx, graphQLReq, &responseData)
-	if !strings.HasPrefix(err.Error(), "graphql: error 0: message (Requested object was not found)") {
+	if !strings.HasPrefix(err.Error(), "graphql: error 0: name (not_found), message (Requested object was not found)") {
 		is.Fail()
 	}
 }
@@ -318,9 +369,9 @@ func TestExponentialBackoffPolicyMultiPart_executeRequest(t *testing.T) {
 
 	ctx := context.Background()
 	client := NewClient(srv.URL, WithDefaultExponentialRetryConfig(), WithBeforeRetryHandler(logHandler(t)), UseMultipartForm())
-	client.Log = func(str string) {
+	client.SetLogger(func(str string) {
 		t.Log(str)
-	}
+	})
 
 	ctx, cancel := context.WithTimeout(ctx, getTestDuration(31))
 	defer cancel()

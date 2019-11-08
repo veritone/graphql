@@ -329,6 +329,7 @@ func (c *clientImp) runWithJSON(ctx context.Context, req *Request, resp interfac
 	if err != nil {
 		return err
 	}
+
 	r.Close = c.closeReq
 	r.Header.Set("Content-Type", "application/json; charset=utf-8")
 	r.Header.Set("Accept", "application/json; charset=utf-8")
@@ -354,7 +355,7 @@ func getGraphQLResp(reader io.ReadCloser, schema interface{}) error {
 
 	err := json.NewDecoder(reader).Decode(schema)
 	if err != nil {
-		// fmt.Println(fmt.Sprintf("Failed to decoding: %+v", errors.Wrap(err, "decoding response")))
+		fmt.Println(fmt.Sprintf("Failed to decoding: %+v", errors.Wrap(err, "decoding response")))
 		return fmt.Errorf("Failed to decoding: %+v", err)
 	}
 

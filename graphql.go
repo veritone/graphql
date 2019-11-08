@@ -136,7 +136,7 @@ var (
 )
 
 // Wrapper method to send request while optionally applying retry policy
-func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req *http.Request, tryCount int) (bool, error) {
+func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req *http.Request, tryCount int) (bool, *http.Response, error) {
 	gr.Errors = nil
 	shouldRetryRequest := false
 
@@ -156,14 +156,14 @@ func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req 
 	// request timeout or should retry by status
 	// Only return if it is not the last time to try
 	if shouldRetryRequest && tryCount < retryConfig.MaxTries {
-		return shouldRetryRequest, err
+		return shouldRetryRequest, resp, err
 	}
 
 	// Check retry by error messages in graphql response
 	if resp != nil {
 		err = getGraphQLResp(resp.Body, &gr)
 		if err != nil {
-			return shouldRetryRequest, err
+			return shouldRetryRequest, resp, err
 		}
 		if len(gr.Errors) > 0 {
 			err = getAggrErr(gr.Errors)
@@ -171,7 +171,7 @@ func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req 
 		}
 	}
 
-	return shouldRetryRequest, err
+	return shouldRetryRequest, resp, err
 }
 
 // Increase interval for exponential backoff policy until hitting MaxInterval
@@ -355,16 +355,17 @@ func getGraphQLResp(reader io.ReadCloser, schema interface{}) error {
 func (c *clientImp) executeRequest(gr *graphResponse, r *http.Request) error {
 	gqlRetryConfig := c.retryConfig
 	var body io.Reader = r.Body
+	var err error
+	var resp *http.Response
 	tryCount := 0
 	shouldRetryRequest := false
-	var err error
 
 	for ; tryCount < gqlRetryConfig.MaxTries; tryCount++ {
 		buf := new(bytes.Buffer)
 		r.Body = ioutil.NopCloser(io.TeeReader(body, buf))
 		c.logf("<< [%d] %s", tryCount, buf.String())
 
-		shouldRetryRequest, err = c.sendRequest(gqlRetryConfig, gr, r, (tryCount + 1))
+		shouldRetryRequest, resp, err = c.sendRequest(gqlRetryConfig, gr, r, (tryCount + 1))
 		c.logf("<< [%d] gr: %+v", tryCount, gr)
 
 		if !shouldRetryRequest || gqlRetryConfig.Policy == "" {
@@ -374,6 +375,10 @@ func (c *clientImp) executeRequest(gr *graphResponse, r *http.Request) error {
 		// the current time is the last time
 		if tryCount == gqlRetryConfig.MaxTries-1 {
 			break
+		}
+
+		if gqlRetryConfig.BeforeRetry != nil {
+			gqlRetryConfig.BeforeRetry(r, resp, err, tryCount+1)
 		}
 
 		body = buf

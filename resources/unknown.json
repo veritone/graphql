@@ -1,6 +1,7 @@
 {
     "errors": [
         {
+            "name": "unknown",
             "message": "Something went wrong",
             "data": "test"
         }

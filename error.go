@@ -45,7 +45,7 @@ func getAggrErr(errList []graphErr) error {
 	var buffer bytes.Buffer
 	buffer.WriteString("graphql: ")
 	for idx, err := range errList {
-		buffer.WriteString(fmt.Sprintf("error %d: message (%s), data (%+v). ", idx, err.Message, err.Data))
+		buffer.WriteString(fmt.Sprintf("error %d: name (%s), message (%s), data (%+v). ", idx, err.Name, err.Message, err.Data))
 	}
 
 	return errors.New(buffer.String())

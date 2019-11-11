@@ -61,6 +61,8 @@ type clientImp struct {
 	retryConfig      RetryConfig
 	defaultHeaders   map[string]string
 	log              func(s string)
+	// closeReq will close the request body immediately allowing for reuse of client
+	closeReq bool
 }
 
 // NewClient makes a new Client capable of making GraphQL requests.
@@ -161,9 +163,15 @@ func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req 
 
 	// Check retry by error messages in graphql response
 	if resp != nil {
-		err = getGraphQLResp(resp.Body, &gr)
-		if err != nil {
-			return shouldRetryRequest, resp, err
+		errDecode := getGraphQLResp(resp.Body, &gr)
+		if errDecode != nil {
+			if err != nil {
+				errDecode = fmt.Errorf("Origin error: (%+v), Decode error: (%+v), Response: (%s)", err, errDecode, toJSONString(resp))
+			} else {
+				errDecode = fmt.Errorf("Decode error: (%+v), Response: (%s)", errDecode, toJSONString(resp))
+			}
+
+			return shouldRetryRequest, resp, errDecode
 		}
 		if len(gr.Errors) > 0 {
 			err = getAggrErr(gr.Errors)
@@ -322,6 +330,7 @@ func (c *clientImp) runWithJSON(ctx context.Context, req *Request, resp interfac
 		return err
 	}
 
+	r.Close = c.closeReq
 	r.Header.Set("Content-Type", "application/json; charset=utf-8")
 	r.Header.Set("Accept", "application/json; charset=utf-8")
 	for key, value := range c.defaultHeaders {
@@ -346,7 +355,8 @@ func getGraphQLResp(reader io.ReadCloser, schema interface{}) error {
 
 	err := json.NewDecoder(reader).Decode(schema)
 	if err != nil {
-		return errors.Wrap(err, "decoding response")
+		fmt.Println(fmt.Sprintf("Failed to decoding: %+v", errors.Wrap(err, "decoding response")))
+		return fmt.Errorf("Failed to decoding: %+v", err)
 	}
 
 	return nil
@@ -438,6 +448,7 @@ func (c *clientImp) runWithPostFields(ctx context.Context, req *Request, resp in
 	if err != nil {
 		return err
 	}
+	r.Close = c.closeReq
 	r.Header.Set("Content-Type", writer.FormDataContentType())
 	r.Header.Set("Accept", "application/json; charset=utf-8")
 	for key, value := range c.defaultHeaders {
@@ -473,6 +484,13 @@ func UseMultipartForm() ClientOption {
 	}
 }
 
+//ImmediatelyCloseReqBody will close the req body immediately after each request body is ready
+func ImmediatelyCloseReqBody() ClientOption {
+	return func(client *clientImp) {
+		client.closeReq = true
+	}
+}
+
 // ClientOption are functions that are passed into NewClient to
 // modify the behaviour of the Client.
 type ClientOption func(*clientImp)
@@ -486,7 +504,7 @@ type graphResponse struct {
 type Request struct {
 	q     string
 	vars  map[string]interface{}
-	files []file
+	files []File
 
 	// Header represent any request headers that will be set
 	// when the request is made.
@@ -510,20 +528,43 @@ func (req *Request) Var(key string, value interface{}) {
 	req.vars[key] = value
 }
 
+// Vars gets the variables for this Request.
+func (req *Request) Vars() map[string]interface{} {
+	return req.vars
+}
+
+// Files gets the files in this request.
+func (req *Request) Files() []File {
+	return req.files
+}
+
+// Query gets the query string of this request.
+func (req *Request) Query() string {
+	return req.q
+}
+
 // File sets a file to upload.
 // Files are only supported with a Client that was created with
 // the UseMultipartForm option.
 func (req *Request) File(fieldname, filename string, r io.Reader) {
-	req.files = append(req.files, file{
+	req.files = append(req.files, File{
 		Field: fieldname,
 		Name:  filename,
 		R:     r,
 	})
 }
 
-// file represents a file to upload.
-type file struct {
+// File represents a file to upload.
+type File struct {
 	Field string
 	Name  string
 	R     io.Reader
+}
+
+func toJSONString(data interface{}) string {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Sprintf("%+v", data)
+	}
+	return string(b)
 }

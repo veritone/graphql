@@ -62,6 +62,33 @@ func TestDoUseMultipartForm(t *testing.T) {
 	is.Equal(calls, 1) // calls
 	is.Equal(responseData["something"], "yes")
 }
+func TestImmediatelyCloseReqBody(t *testing.T) {
+	is := is.New(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		is.Equal(r.Method, http.MethodPost)
+		query := r.FormValue("query")
+		is.Equal(query, `query {}`)
+		io.WriteString(w, `{
+			"data": {
+				"something": "yes"
+			}
+		}`)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	client := NewClient(srv.URL, ImmediatelyCloseReqBody(), UseMultipartForm())
+
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	var responseData map[string]interface{}
+	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
+	is.NoErr(err)
+	is.Equal(calls, 1) // calls
+	is.Equal(responseData["something"], "yes")
+}
 
 func TestDoErr(t *testing.T) {
 	is := is.New(t)
@@ -86,6 +113,57 @@ func TestDoErr(t *testing.T) {
 	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
 	is.True(err != nil)
 	is.Equal(err.Error(), "graphql: error 0: name (unknown), message (Something went wrong), data (test). ")
+}
+
+func TestDoServerErr(t *testing.T) {
+	is := is.New(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		is.Equal(r.Method, http.MethodPost)
+		query := r.FormValue("query")
+		is.Equal(query, `query {}`)
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, `Internal Server Error`)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	client := NewClient(srv.URL, UseMultipartForm())
+
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	var responseData map[string]interface{}
+	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
+	is.True(strings.Contains(err.Error(), "Decode error") && strings.Contains(err.Error(), "Internal Server Error"))
+}
+
+func TestDoBadRequestErr(t *testing.T) {
+	is := is.New(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		is.Equal(r.Method, http.MethodPost)
+		query := r.FormValue("query")
+		is.Equal(query, `query {}`)
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{
+			"errors": [{
+				"name":"BadRequest",
+				"message": "miscellaneous message as to why the the request was bad"
+			}]
+		}`)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	client := NewClient(srv.URL, UseMultipartForm())
+
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	var responseData map[string]interface{}
+	err := client.Run(ctx, &Request{q: "query {}"}, &responseData)
+	is.True(strings.Contains(err.Error(), "message (miscellaneous message as to why the the request was bad)"))
 }
 
 func TestDoNoResponse(t *testing.T) {

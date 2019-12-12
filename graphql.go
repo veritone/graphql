@@ -106,6 +106,9 @@ type RetryConfig struct {
 	RetryStatus map[int]bool `json:"statusToRetry"`
 	// Client can use this function to supply some logic to further debug GraphQL request & response
 	BeforeRetry func(req *http.Request, resp *http.Response, err error, attemptNum int)
+	// We have a lot of api issues related to api reponse as string of http. It is the root cause why fail to decode
+	// The status might be 500, 400, ... Should add the option to retry
+	ShouldRetryWhenFailedToDecode bool
 }
 
 // PolicyType defines a type of different possible Policies to be applied towards retrying
@@ -169,6 +172,10 @@ func (c *clientImp) sendRequest(retryConfig RetryConfig, gr *graphResponse, req 
 				errDecode = fmt.Errorf("Origin error: (%+v), Decode error: (%+v), Response: (%s)", err, errDecode, toJSONString(resp))
 			} else {
 				errDecode = fmt.Errorf("Decode error: (%+v), Response: (%s)", errDecode, toJSONString(resp))
+			}
+
+			if retryConfig.ShouldRetryWhenFailedToDecode {
+				shouldRetryRequest = true
 			}
 
 			return shouldRetryRequest, resp, errDecode

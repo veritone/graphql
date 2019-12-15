@@ -254,6 +254,13 @@ func WithDefaultHeaders(defaultHeaders map[string]string) ClientOption {
 	}
 }
 
+// WithEnableCloseHTTPRequest provides a option to close the request or not
+func WithEnableCloseHTTPRequest() ClientOption {
+	return func(client *clientImp) {
+		client.closeReq = true
+	}
+}
+
 // Run executes the query and unmarshals the response from the data field
 // into the response object.
 // Pass in a nil response object to skip response parsing.
